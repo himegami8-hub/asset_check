@@ -1,17 +1,38 @@
-# asset_check
+﻿# asset_check
 
-A new Flutter project.
+現場向けのチェック支援アプリ（Flutter）。
 
-## Getting Started
+## 主な機能
 
-This project is a starting point for a Flutter application.
+- CSVまたは連番リストのチェック
+- OCR読み取りによる候補取込
+- 同期メニューからの初期リスト共有
+- 端末間の差分同期
+- 連続QR（分割QR）によるオフライン共有
 
-A few resources to get you started if this is your first Flutter project:
+## 連続QR同期の使い方
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
+### 初期リスト
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+1. 送信側: `同期メニュー` -> `初期リスト連続QRを表示（送信側）`
+2. 受信側: `同期メニュー` -> `初期リスト連続QRを読取して取込（受信側）`
+3. 受信側は同一転送のQRを連続で読み取ると自動で復元されます
+
+### 差分
+
+1. 送信側: `同期メニュー` -> `差分連続QRを表示（送信側）`
+2. 受信側: `同期メニュー` -> `差分連続QRを読取して取込（受信側）`
+3. 受信側は同一転送のQRを連続で読み取ると自動で統合されます
+
+## 開発
+
+```bash
+flutter pub get
+flutter run
+```
+
+解析:
+
+```bash
+flutter analyze
+```
