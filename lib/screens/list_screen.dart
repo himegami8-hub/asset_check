@@ -47,6 +47,14 @@ class _ListScreenState extends State<ListScreen> {
   static const Duration highlightDuration = Duration(seconds: 2);
   static const String autoBackupFileName = 'asset_check_autosave.json';
   static const String manualBackupFileName = 'asset_check_manual_backup.json';
+  static final List<Color> okRowPalette = [
+    Colors.green.shade300,
+    Colors.lightBlue.shade100,
+    Colors.blue.shade300,
+    Colors.purple.shade100,
+    Colors.purple.shade300,
+    Colors.grey.shade500,
+  ];
 
   CheckMode mode = CheckMode.csv;
   InputMode inputMode = InputMode.manual;
@@ -84,6 +92,8 @@ class _ListScreenState extends State<ListScreen> {
   int lastExportedSyncSeq = 0;
   List<SyncEvent> syncEvents = [];
   String syncReceiverToken = '';
+  final Map<String, int> okRowColorByKey6 = {};
+  final Map<String, int> okCountByKey6 = {};
 
   @override
   void initState() {
@@ -561,6 +571,8 @@ class _ListScreenState extends State<ListScreen> {
       'nextSyncEventSeq': nextSyncEventSeq,
       'lastExportedSyncSeq': lastExportedSyncSeq,
       'syncEvents': syncEvents.map((event) => event.toJson()).toList(),
+      'okRowColorByKey6': okRowColorByKey6,
+      'okCountByKey6': okCountByKey6,
     };
     await file.writeAsString(jsonEncode(payload), flush: true);
   }
@@ -630,6 +642,31 @@ class _ListScreenState extends State<ListScreen> {
         syncEvents = (data['syncEvents'] as List<dynamic>? ?? [])
             .map((item) => SyncEvent.fromJson(item as Map<String, dynamic>))
             .toList();
+        okRowColorByKey6
+          ..clear()
+          ..addAll(
+            (data['okRowColorByKey6'] as Map<String, dynamic>? ?? {}).entries
+                .where(
+                  (entry) =>
+                      entry.value is int &&
+                      entry.value >= 0 &&
+                      entry.value < okRowPalette.length,
+                )
+                .fold<Map<String, int>>({}, (acc, entry) {
+                  acc[entry.key] = entry.value as int;
+                  return acc;
+                }),
+          );
+        okCountByKey6
+          ..clear()
+          ..addAll(
+            (data['okCountByKey6'] as Map<String, dynamic>? ?? {}).entries
+                .where((entry) => entry.value is int && entry.value > 1)
+                .fold<Map<String, int>>({}, (acc, entry) {
+                  acc[entry.key] = entry.value as int;
+                  return acc;
+                }),
+          );
         highlightedItem = null;
         cleanupItemUiCaches();
       });
@@ -876,6 +913,8 @@ class _ListScreenState extends State<ListScreen> {
         item.previousStatus = item.status == 'OK' ? 'OK' : item.previousStatus;
         item.status = '保留';
         item.needsSelection = true;
+        okRowColorByKey6.remove(item.key6);
+        okCountByKey6.remove(item.key6);
         if (!wasPending) {
           affected += 1;
         }
@@ -886,6 +925,7 @@ class _ListScreenState extends State<ListScreen> {
 
   void cleanupItemUiCaches() {
     final existingItems = <Item>{...csvItems, ...rangeItems};
+    final existingKeys = existingItems.map((item) => item.key6).toSet();
     itemTileKeys.removeWhere((item, _) => !existingItems.contains(item));
     final removed = itemSwipeOffsetNotifiers.entries
         .where((entry) => !existingItems.contains(entry.key))
@@ -898,6 +938,10 @@ class _ListScreenState extends State<ListScreen> {
     if (activeSwipeItem != null && !existingItems.contains(activeSwipeItem)) {
       activeSwipeItem = null;
     }
+    okRowColorByKey6.removeWhere((key, _) => !existingKeys.contains(key));
+    okCountByKey6.removeWhere(
+      (key, value) => !existingKeys.contains(key) || value <= 1,
+    );
   }
 
   Future<void> processAutoSaveQueue() async {
@@ -1904,6 +1948,8 @@ class _ListScreenState extends State<ListScreen> {
           if (relatedItem.needsSelection == true ||
               relatedItem.status == '保留') {
             relatedItem.status = relatedItem.previousStatus ?? '未処理';
+            okRowColorByKey6.remove(relatedItem.key6);
+            okCountByKey6.remove(relatedItem.key6);
           }
           relatedItem.needsSelection = false;
           relatedItem.previousStatus = null;
@@ -1938,6 +1984,8 @@ class _ListScreenState extends State<ListScreen> {
       lastResult = '';
       duplicateInfo = '';
       highlightedItem = null;
+      okRowColorByKey6.clear();
+      okCountByKey6.clear();
     });
     clearInput();
     queueAutoSave();
@@ -2061,9 +2109,17 @@ class _ListScreenState extends State<ListScreen> {
 
     setState(() {
       if (matches.length == 1) {
+        final wasUnchecked = matches.first.status == '未処理';
         matches.first.needsSelection = false;
         matches.first.status = 'OK';
         matches.first.previousStatus = null;
+        if (wasUnchecked) {
+          okRowColorByKey6[matches.first.key6] = 0;
+        }
+        okCountByKey6[matches.first.key6] = max(
+          okCountByKey6[matches.first.key6] ?? 0,
+          1,
+        );
         lastResult = 'OK（${getMatchSourceLabelForItem(matches.first)}）';
         duplicateInfo = '';
         if (normalized.isNotEmpty) {
@@ -2103,6 +2159,8 @@ class _ListScreenState extends State<ListScreen> {
           item.needsSelection = true;
           if (item.status != 'OK') {
             item.status = '保留';
+            okRowColorByKey6.remove(item.key6);
+            okCountByKey6.remove(item.key6);
             recordLocalSyncEvent(
               action: 'set_status',
               key6: item.key6,
@@ -2150,14 +2208,96 @@ class _ListScreenState extends State<ListScreen> {
   Color getColor(String status) {
     switch (status) {
       case 'OK':
-        return Colors.green.shade300;
+        return Colors.lightBlue.shade100;
       case '保留':
         return Colors.yellow.shade300;
       case 'NG':
-        return Colors.red.shade300;
+        return Colors.grey.shade300;
       default:
         return Colors.white;
     }
+  }
+
+  Color resolveItemRowColor(Item item) {
+    if (item.status == 'OK') {
+      final colorIndex = okRowColorByKey6[item.key6];
+      if (colorIndex != null &&
+          colorIndex >= 0 &&
+          colorIndex < okRowPalette.length) {
+        return okRowPalette[colorIndex];
+      }
+    }
+    return getColor(item.status);
+  }
+
+  String statusLabelWithCount(Item item) {
+    if (item.status == 'OK') {
+      final count = okCountByKey6[item.key6] ?? 1;
+      if (count > 1) {
+        return 'OK x$count';
+      }
+    }
+    return item.status;
+  }
+
+  Future<int?> showOkRowColorPicker(Item item) async {
+    if (isDialogShowing) {
+      return null;
+    }
+    isDialogShowing = true;
+    int selectedIndex = okRowColorByKey6[item.key6] ?? 0;
+
+    final result = await showDialog<int>(
+      context: context,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (statefulContext, setState) {
+            return AlertDialog(
+              title: const Text('OK行の色を選択'),
+              content: Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                children: List.generate(okRowPalette.length, (index) {
+                  final selected = selectedIndex == index;
+                  return InkWell(
+                    onTap: () {
+                      setState(() {
+                        selectedIndex = index;
+                      });
+                    },
+                    borderRadius: BorderRadius.circular(8),
+                    child: Container(
+                      width: 44,
+                      height: 44,
+                      decoration: BoxDecoration(
+                        color: okRowPalette[index],
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color: selected ? Colors.black87 : Colors.black26,
+                          width: selected ? 3 : 1,
+                        ),
+                      ),
+                    ),
+                  );
+                }),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(dialogContext),
+                  child: const Text('キャンセル'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.pop(dialogContext, selectedIndex),
+                  child: const Text('OKにする'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+    isDialogShowing = false;
+    return result;
   }
 
   String get modeLabel {
@@ -2306,7 +2446,7 @@ class _ListScreenState extends State<ListScreen> {
     }
   }
 
-  void applySwipeAction(Item item, SwipeItemAction action) {
+  Future<void> applySwipeAction(Item item, SwipeItemAction action) async {
     if (action == SwipeItemAction.delete) {
       setState(() {
         recordLocalSyncEvent(
@@ -2325,6 +2465,8 @@ class _ListScreenState extends State<ListScreen> {
         if (identical(highlightedItem, item)) {
           highlightedItem = null;
         }
+        okRowColorByKey6.remove(item.key6);
+        okCountByKey6.remove(item.key6);
         lastInput = item.key6;
         lastResult = '削除';
         duplicateInfo = '';
@@ -2333,6 +2475,16 @@ class _ListScreenState extends State<ListScreen> {
       queueAutoSave();
       showCenterMessage('${item.key6} を削除しました');
       return;
+    }
+
+    final wasUncheckedBeforeSwipeOk =
+        action == SwipeItemAction.ok && item.status == '未処理';
+    int? selectedOkColorIndex;
+    if (action == SwipeItemAction.ok && !wasUncheckedBeforeSwipeOk) {
+      selectedOkColorIndex = await showOkRowColorPicker(item);
+      if (!mounted || selectedOkColorIndex == null) {
+        return;
+      }
     }
 
     setState(() {
@@ -2344,10 +2496,20 @@ class _ListScreenState extends State<ListScreen> {
         relatedItem.previousStatus = null;
         if (!identical(relatedItem, item) && relatedItem.status == '保留') {
           relatedItem.status = '未処理';
+          okRowColorByKey6.remove(relatedItem.key6);
+          okCountByKey6.remove(relatedItem.key6);
         }
       }
 
       item.status = action == SwipeItemAction.ok ? 'OK' : '保留';
+      if (action == SwipeItemAction.ok) {
+        okRowColorByKey6[item.key6] =
+            wasUncheckedBeforeSwipeOk ? 0 : (selectedOkColorIndex ?? 0);
+        okCountByKey6[item.key6] = max(okCountByKey6[item.key6] ?? 0, 1);
+      } else {
+        okRowColorByKey6.remove(item.key6);
+        okCountByKey6.remove(item.key6);
+      }
       item.needsSelection = false;
       item.previousStatus = null;
       recordLocalSyncEvent(
@@ -2429,7 +2591,7 @@ class _ListScreenState extends State<ListScreen> {
           content: Text(
             '${item.key6} は過去にチェック済みです。'
             '${duplicateChecksAgo != null ? '\n$duplicateChecksAgo回前のチェックと重複しています。' : ''}'
-            '\n保留にするか、未チェックに戻すか選んでください。',
+            '\n保留・カウント追加・未チェック戻し から選んでください。',
           ),
           actions: [
             TextButton(
@@ -2439,6 +2601,10 @@ class _ListScreenState extends State<ListScreen> {
             TextButton(
               onPressed: () => Navigator.pop(dialogContext, 'pending'),
               child: const Text('保留'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, 'count_up'),
+              child: const Text('カウント追加'),
             ),
             FilledButton(
               onPressed: () => Navigator.pop(dialogContext, 'unchecked'),
@@ -2465,15 +2631,34 @@ class _ListScreenState extends State<ListScreen> {
         relatedItem.needsSelection = false;
         if (!identical(relatedItem, item) && relatedItem.status == '保留') {
           relatedItem.status = relatedItem.previousStatus ?? '未処理';
+          okRowColorByKey6.remove(relatedItem.key6);
+          okCountByKey6.remove(relatedItem.key6);
         }
         if (!identical(relatedItem, item)) {
           relatedItem.previousStatus = null;
         }
       }
 
-      if (action == 'pending') {
+      if (action == 'count_up') {
+        item.status = 'OK';
+        item.needsSelection = false;
+        okRowColorByKey6[item.key6] = okRowColorByKey6[item.key6] ?? 0;
+        final nextCount = (okCountByKey6[item.key6] ?? 1) + 1;
+        okCountByKey6[item.key6] = nextCount;
+        lastResult = 'OK x$nextCount';
+        duplicateInfo = '';
+        recordLocalSyncEvent(
+          action: 'set_status',
+          key6: item.key6,
+          status: 'OK',
+          itemName: item.name,
+        );
+        addOperationLog('${item.key6} の重複カウントを $nextCount にしました');
+      } else if (action == 'pending') {
         item.status = '保留';
         item.needsSelection = true;
+        okRowColorByKey6.remove(item.key6);
+        okCountByKey6.remove(item.key6);
         lastResult = '保留';
         duplicateInfo = '';
         recordLocalSyncEvent(
@@ -2486,6 +2671,12 @@ class _ListScreenState extends State<ListScreen> {
       } else {
         item.status = '未処理';
         item.needsSelection = false;
+        okRowColorByKey6.remove(item.key6);
+        okCountByKey6.remove(item.key6);
+        swipeOffsetNotifierForItem(item).value = 0;
+        if (identical(activeSwipeItem, item)) {
+          activeSwipeItem = null;
+        }
         removeLatestCheckFromHistory(item.key6);
         lastResult = '未処理';
         duplicateInfo = '';
@@ -2501,15 +2692,19 @@ class _ListScreenState extends State<ListScreen> {
     });
     queueAutoSave();
 
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      scrollToItem(item);
-      highlightItem(item);
-    });
+    if (action != 'unchecked') {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        scrollToItem(item);
+        highlightItem(item);
+      });
+    }
 
     showCenterMessage(
-      action == 'pending'
-          ? '${item.key6} を保留にしました'
-          : '${item.key6} を未チェックに戻しました',
+      action == 'count_up'
+          ? '${item.key6} の重複カウントを追加しました'
+          : (action == 'pending'
+                ? '${item.key6} を保留にしました'
+                : '${item.key6} を未チェックに戻しました'),
     );
   }
 
@@ -2570,6 +2765,8 @@ class _ListScreenState extends State<ListScreen> {
       rangeStart = null;
       rangeEnd = null;
       highlightedItem = null;
+      okRowColorByKey6.clear();
+      okCountByKey6.clear();
       cleanupItemUiCaches();
     });
     clearInput();
@@ -4023,7 +4220,7 @@ class _ListScreenState extends State<ListScreen> {
                           isSelectionCandidate && item.status == 'OK';
                       final hasSelectionHint =
                           item.status == '保留' || item.needsSelection == true;
-                      final baseColor = getColor(item.status);
+                      final baseColor = resolveItemRowColor(item);
                       final flashColor = Color.alphaBlend(
                         Theme.of(
                           context,
@@ -4161,7 +4358,9 @@ class _ListScreenState extends State<ListScreen> {
                                                         ),
                                                     ],
                                                   ),
-                                            trailing: Text(item.status),
+                                            trailing: Text(
+                                              statusLabelWithCount(item),
+                                            ),
                                           ),
                                         ),
                                       ),
